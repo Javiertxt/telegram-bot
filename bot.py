@@ -1,18 +1,21 @@
 import logging
-from telegram import Bot, Update, ParseMode
+from telegram import Bot, Update, ParseMode, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from datetime import datetime, timedelta
+import pytz
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Define states for conversation
-(CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE) = range(10)
+(CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE, CONFIRM) = range(11)
 
 # Dictionary to store publication data
 publication_data = {}
+scheduled_jobs = {}
 
 # Create scheduler
 scheduler = BackgroundScheduler()
@@ -59,25 +62,54 @@ def old_price(update: Update, context: CallbackContext) -> int:
 
 def link(update: Update, context: CallbackContext) -> int:
     publication_data['link'] = update.message.text
-    update.message.reply_text('Imagen de la publicación:')
+    update.message.reply_text('Imagen de la publicación (URL o sube un archivo de imagen):')
     return IMAGE
 
 def image(update: Update, context: CallbackContext) -> int:
-    publication_data['image'] = update.message.text
+    if update.message.photo:
+        publication_data['image'] = update.message.photo[-1].file_id
+        publication_data['image_type'] = 'file_id'
+    else:
+        publication_data['image'] = update.message.text
+        publication_data['image_type'] = 'url'
     update.message.reply_text('¿Cuándo deseas programar la publicación? (Formato: AAAA-MM-DD HH:MM)')
     return SCHEDULE
 
 def schedule(update: Update, context: CallbackContext) -> int:
     publication_data['schedule'] = update.message.text
     try:
-        # Schedule the message
         schedule_time = datetime.strptime(publication_data['schedule'], '%Y-%m-%d %H:%M')
-        scheduler.add_job(send_message, DateTrigger(run_date=schedule_time), [context])
-        update.message.reply_text('Publicación programada!')
+        schedule_time = pytz.timezone('UTC').localize(schedule_time)
+        publication_data['schedule_time'] = schedule_time
+        preview_text = (
+            f"<b><a href='{publication_data['link']}'>{publication_data['name']}</a></b>\n\n"
+            f"<b>{publication_data['title']}</b>\n\n"
+            f"{publication_data['description']}\n\n"
+            f"<b>{publication_data['coupon']}</b>\n\n"
+            f"<b><i>{publication_data['offer_price']}</i></b>\n\n"
+            f"<s>{publication_data['old_price']}</s>\n\n"
+            f"{publication_data['link']}"
+        )
+        if publication_data['image_type'] == 'file_id':
+            context.bot.send_photo(chat_id=update.message.chat_id, photo=publication_data['image'], caption=preview_text, parse_mode=ParseMode.HTML)
+        else:
+            context.bot.send_photo(chat_id=update.message.chat_id, photo=publication_data['image'], caption=preview_text, parse_mode=ParseMode.HTML)
+        
+        update.message.reply_text('¿Confirmas la publicación? (Sí/No)')
+        return CONFIRM
     except ValueError:
         update.message.reply_text('Formato de fecha/hora incorrecto. Por favor usa AAAA-MM-DD HH:MM.')
         return SCHEDULE
-    return ConversationHandler.END
+
+def confirm(update: Update, context: CallbackContext) -> int:
+    if update.message.text.lower() == 'sí':
+        job = scheduler.add_job(send_message, DateTrigger(run_date=publication_data['schedule_time']), [context], id=str(update.message.chat_id))
+        scheduled_jobs[job.id] = publication_data.copy()
+        update.message.reply_text('Publicación programada!')
+        return ConversationHandler.END
+    else:
+        update.message.reply_text('Operación cancelada.')
+        return ConversationHandler.END
 
 def send_message(context: CallbackContext) -> None:
     bot: Bot = context.bot
@@ -91,15 +123,37 @@ def send_message(context: CallbackContext) -> None:
         f"<s>{publication_data['old_price']}</s>\n\n"
         f"{publication_data['link']}"
     )
-    bot.send_message(chat_id=channel_id, text=message, parse_mode=ParseMode.HTML)
-    bot.send_photo(chat_id=channel_id, photo=publication_data['image'])
+    if publication_data['image_type'] == 'file_id':
+        bot.send_photo(chat_id=channel_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
+    else:
+        bot.send_photo(chat_id=channel_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
+
+def list_scheduled(update: Update, context: CallbackContext) -> None:
+    if scheduled_jobs:
+        for job_id, job_data in scheduled_jobs.items():
+            schedule_time = job_data['schedule']
+            preview_text = (
+                f"Publicación programada para {schedule_time}\n"
+                f"Canal: {job_data['channel']}\n"
+                f"Nombre: {job_data['name']}\n"
+                f"Título: {job_data['title']}\n"
+                f"Descripción: {job_data['description']}\n"
+                f"Cupón: {job_data['coupon']}\n"
+                f"Precio oferta: {job_data['offer_price']}\n"
+                f"Precio anterior: {job_data['old_price']}\n"
+                f"Link: {job_data['link']}\n"
+                f"Imagen: {job_data['image']}"
+            )
+            update.message.reply_text(preview_text)
+    else:
+        update.message.reply_text("No hay publicaciones programadas.")
 
 def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Operación cancelada.')
     return ConversationHandler.END
 
 def main():
-    updater = Updater("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8", use_context=True)
+    updater = Updater("YOUR_BOT_TOKEN", use_context=True)
     dp = updater.dispatcher
 
     conv_handler = ConversationHandler(
@@ -115,11 +169,13 @@ def main():
             LINK: [MessageHandler(Filters.text & ~Filters.command, link)],
             IMAGE: [MessageHandler(Filters.text & ~Filters.command, image)],
             SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, schedule)],
+            CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
 
     dp.add_handler(conv_handler)
+    dp.add_handler(CommandHandler('list', list_scheduled))
 
     updater.start_polling()
     updater.idle()
