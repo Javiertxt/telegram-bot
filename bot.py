@@ -9,6 +9,10 @@ from datetime import datetime
 import pytz
 import os
 
+# Obtener el token del bot desde las variables de entorno
+TOKEN = os.getenv("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8")
+print("Token del Bot:", TOKEN)  # Añadimos esta línea para imprimir el token
+
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
