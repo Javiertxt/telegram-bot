@@ -1,10 +1,13 @@
 import logging
 from telegram import Bot, Update, ParseMode, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+from telegram.ext import Dispatcher
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
+from flask import Flask, request
 from datetime import datetime
 import pytz
+import os
 
 # Enable logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -23,6 +26,18 @@ scheduler.start()
 
 # Set timezone for Spain
 timezone = pytz.timezone('Europe/Madrid')
+
+app = Flask(__name__)
+
+# Your bot token from BotFather
+TOKEN = os.getenv("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8")
+bot = Bot(token=TOKEN)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'ok', 200
 
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Hola! En qué canal deseas publicar? (Introduce el ID del canal)')
@@ -178,9 +193,8 @@ def list_scheduled(update: Update, context: CallbackContext) -> None:
 def edit_scheduled(update: Update, context: CallbackContext) -> None:
     job_id = update.message.text.split()[1]
     if job_id in scheduled_jobs:
-        job_data = scheduled_jobs[job_id]
-        context.user_data['edit_job_id'] = job_id
-        update.message.reply_text(f"Editando publicación ID: {job_id}. ¿Qué deseas modificar?\n1. Canal\n2. Nombre\n3. Título\n4. Descripción\n5. Cupón\n6. Precio oferta\n7. Precio anterior\n8. Link\n9. Imagen\n10. Fecha/Hora")
+        context.user_data['edit_id'] = job_id
+        update.message.reply_text(f"Editando publicación ID: {job_id}\nPor favor ingresa el nuevo valor para el campo:\n1. Canal\n2. Nombre\n3. Título\n4. Descripción\n5. Cupón\n6. Precio oferta\n7. Precio anterior\n8. Link\n9. Imagen\n10. Fecha/Hora")
         return 1
     else:
         update.message.reply_text("ID de publicación no encontrado.")
@@ -200,9 +214,10 @@ def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 def main() -> None:
-    updater = Updater("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8", use_context=True)
+    global dispatcher
 
-    dp = updater.dispatcher
+    updater = Updater(token=TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -223,12 +238,16 @@ def main() -> None:
         fallbacks=[CommandHandler('cancel', cancel)]
     )
 
-    dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler('list', list_scheduled))
-    dp.add_handler(CommandHandler('delete', delete_scheduled, pass_args=True))
-    dp.add_handler(CommandHandler('edit', edit_scheduled, pass_args=True))
+    dispatcher.add_handler(conv_handler)
+    dispatcher.add_handler(CommandHandler('list', list_scheduled))
+    dispatcher.add_handler(CommandHandler('delete', delete_scheduled, pass_args=True))
+    dispatcher.add_handler(CommandHandler('edit', edit_scheduled, pass_args=True))
 
-    updater.start_polling()
+    updater.start_webhook(listen="0.0.0.0",
+                          port=int(os.environ.get('PORT', '8443')),
+                          url_path=TOKEN,
+                          webhook_url=f"https://<your-render-subdomain>.onrender.com/{TOKEN}")
+
     updater.idle()
 
 if __name__ == '__main__':
