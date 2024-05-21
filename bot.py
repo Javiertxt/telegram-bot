@@ -3,7 +3,7 @@ from telegram import Bot, Update, ParseMode, InputMediaPhoto
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # Enable logging
@@ -20,6 +20,9 @@ scheduled_jobs = {}
 # Create scheduler
 scheduler = BackgroundScheduler()
 scheduler.start()
+
+# Set timezone for Spain
+timezone = pytz.timezone('Europe/Madrid')
 
 def start(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Hola! En qué canal deseas publicar? (Introduce el ID del canal)')
@@ -88,7 +91,7 @@ def schedule(update: Update, context: CallbackContext) -> int:
     else:
         try:
             schedule_time = datetime.strptime(publication_data['schedule'], '%Y-%m-%d %H:%M')
-            schedule_time = pytz.timezone('UTC').localize(schedule_time)
+            schedule_time = timezone.localize(schedule_time)
             publication_data['schedule_time'] = schedule_time
             preview_text = create_preview(publication_data)
             if publication_data['image_type'] == 'file_id':
@@ -154,9 +157,10 @@ def create_preview(data: dict) -> str:
 def list_scheduled(update: Update, context: CallbackContext) -> None:
     if scheduled_jobs:
         for job_id, job_data in scheduled_jobs.items():
-            schedule_time = job_data['schedule']
+            schedule_time = job_data['schedule_time'].strftime('%Y-%m-%d %H:%M')
             preview_text = (
-                f"Publicación programada para {schedule_time}\n"
+                f"ID: {job_id}\n"
+                f"Programada para: {schedule_time}\n"
                 f"Canal: {job_data['channel']}\n"
                 f"Nombre: {job_data['name']}\n"
                 f"Título: {job_data['title']}\n"
@@ -171,12 +175,33 @@ def list_scheduled(update: Update, context: CallbackContext) -> None:
     else:
         update.message.reply_text("No hay publicaciones programadas.")
 
+def edit_scheduled(update: Update, context: CallbackContext) -> None:
+    job_id = update.message.text.split()[1]
+    if job_id in scheduled_jobs:
+        job_data = scheduled_jobs[job_id]
+        context.user_data['edit_job_id'] = job_id
+        update.message.reply_text(f"Editando publicación ID: {job_id}. ¿Qué deseas modificar?\n1. Canal\n2. Nombre\n3. Título\n4. Descripción\n5. Cupón\n6. Precio oferta\n7. Precio anterior\n8. Link\n9. Imagen\n10. Fecha/Hora")
+        return 1
+    else:
+        update.message.reply_text("ID de publicación no encontrado.")
+        return ConversationHandler.END
+
+def delete_scheduled(update: Update, context: CallbackContext) -> None:
+    job_id = update.message.text.split()[1]
+    if job_id in scheduled_jobs:
+        scheduler.remove_job(job_id)
+        del scheduled_jobs[job_id]
+        update.message.reply_text(f"Publicación ID: {job_id} eliminada.")
+    else:
+        update.message.reply_text("ID de publicación no encontrado.")
+
 def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Operación cancelada.')
     return ConversationHandler.END
 
-def main():
+def main() -> None:
     updater = Updater("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8", use_context=True)
+
     dp = updater.dispatcher
 
     conv_handler = ConversationHandler(
@@ -200,6 +225,8 @@ def main():
 
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('list', list_scheduled))
+    dp.add_handler(CommandHandler('delete', delete_scheduled, pass_args=True))
+    dp.add_handler(CommandHandler('edit', edit_scheduled, pass_args=True))
 
     updater.start_polling()
     updater.idle()
