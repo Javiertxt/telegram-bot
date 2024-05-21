@@ -102,7 +102,7 @@ def schedule(update: Update, context: CallbackContext) -> int:
             return SCHEDULE
 
 def confirm(update: Update, context: CallbackContext) -> int:
-    if update.message.text.lower() == 'sí':
+    if update.message.text.lower() in ['sí', 'si']:
         job = scheduler.add_job(send_message, DateTrigger(run_date=publication_data['schedule_time']), [context])
         scheduled_jobs[job.id] = publication_data.copy()
         update.message.reply_text('Publicación programada!')
@@ -112,13 +112,24 @@ def confirm(update: Update, context: CallbackContext) -> int:
         return ConversationHandler.END
 
 def publish_now(update: Update, context: CallbackContext) -> int:
-    if update.message.text.lower() == 'sí':
+    if update.message.text.lower() in ['sí', 'si']:
         send_message_now(context)
         update.message.reply_text('Publicación realizada!')
         return ConversationHandler.END
     else:
         update.message.reply_text('Operación cancelada.')
         return ConversationHandler.END
+
+def send_message(context: CallbackContext) -> None:
+    bot: Bot = context.bot
+    job = context.job
+    data = job.args[0]
+    channel_id = data['channel']
+    message = create_preview(data)
+    if data['image_type'] == 'file_id':
+        bot.send_photo(chat_id=channel_id, photo=data['image'], caption=message, parse_mode=ParseMode.HTML)
+    else:
+        bot.send_photo(chat_id=channel_id, photo=data['image'], caption=message, parse_mode=ParseMode.HTML)
 
 def send_message_now(context: CallbackContext) -> None:
     bot: Bot = context.bot
