@@ -1,201 +1,174 @@
-import os
-
-# Imprime el valor de la variable de entorno TELEGRAM_BOT_TOKEN
-print("Valor de TELEGRAM_BOT_TOKEN:", os.getenv("TELEGRAM_BOT_TOKEN"))
-
-import logging
-from telegram import Bot, Update, InputFile
+from telegram import Update, Bot, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
-from telegram.utils.request import Request
-import os
-import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from datetime import datetime
+import pytz
+import os
 
-# Definir constantes para los estados de la conversación
-CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE, CONFIRM, PUBLISH_NOW = range(12)
-
-# Configurar el logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Crear el diccionario para almacenar los trabajos programados
-scheduled_jobs = {}
-
-# Inicializar el scheduler
-scheduler = BackgroundScheduler(timezone="Europe/Madrid")
-scheduler.start()
-
-# Obtener el token del bot desde las variables de entorno
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Crear el bot y el updater
-request = Request(con_pool_size=8)
-bot = Bot(token=TOKEN, request=request)
-updater = Updater(bot=bot, use_context=True)
+# Verificar la configuración del token
+print("Valor de TELEGRAM_BOT_TOKEN:", TOKEN)
+
+bot = Bot(token=TOKEN)
+updater = Updater(token=TOKEN, use_context=True)
+dispatcher = updater.dispatcher
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+# Estados del bot
+TIENDA, TITULO, DESCRIPCION, CUPON, OFERTA, ANTES, LINK, IMAGEN, CONFIRMAR, CANAL, PROGRAMA = range(11)
+
+publicaciones_programadas = []
 
 def start(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text('¡Hola! Vamos a crear una publicación. ¿En qué canal quieres publicarla?')
-    return CHANNEL
+    update.message.reply_text("Bienvenido al bot de publicación. Por favor, ingresa el nombre de la tienda:")
+    return TIENDA
 
-def channel(update: Update, context: CallbackContext) -> int:
-    context.user_data['channel'] = update.message.text
-    update.message.reply_text('Nombre de la tienda:')
-    return NAME
+def tienda(update: Update, context: CallbackContext) -> int:
+    context.user_data['tienda'] = update.message.text
+    update.message.reply_text("Título de la publicación:")
+    return TITULO
 
-def name(update: Update, context: CallbackContext) -> int:
-    context.user_data['name'] = update.message.text
-    update.message.reply_text('Título:')
-    return TITLE
+def titulo(update: Update, context: CallbackContext) -> int:
+    context.user_data['titulo'] = update.message.text
+    update.message.reply_text("Descripción de la publicación:")
+    return DESCRIPCION
 
-def title(update: Update, context: CallbackContext) -> int:
-    context.user_data['title'] = update.message.text
-    update.message.reply_text('Descripción:')
-    return DESCRIPTION
+def descripcion(update: Update, context: CallbackContext) -> int:
+    context.user_data['descripcion'] = update.message.text
+    update.message.reply_text("Cupón de descuento:")
+    return CUPON
 
-def description(update: Update, context: CallbackContext) -> int:
-    context.user_data['description'] = update.message.text
-    update.message.reply_text('Cupón descuento:')
-    return COUPON
+def cupon(update: Update, context: CallbackContext) -> int:
+    context.user_data['cupon'] = update.message.text
+    update.message.reply_text("Precio de oferta:")
+    return OFERTA
 
-def coupon(update: Update, context: CallbackContext) -> int:
-    context.user_data['coupon'] = update.message.text
-    update.message.reply_text('Precio de oferta:')
-    return OFFER_PRICE
+def oferta(update: Update, context: CallbackContext) -> int:
+    context.user_data['oferta'] = update.message.text
+    update.message.reply_text("Precio anterior:")
+    return ANTES
 
-def offer_price(update: Update, context: CallbackContext) -> int:
-    context.user_data['offer_price'] = update.message.text
-    update.message.reply_text('Precio anterior:')
-    return OLD_PRICE
-
-def old_price(update: Update, context: CallbackContext) -> int:
-    context.user_data['old_price'] = update.message.text
-    update.message.reply_text('Link de la publicación:')
+def antes(update: Update, context: CallbackContext) -> int:
+    context.user_data['antes'] = update.message.text
+    update.message.reply_text("Link de la publicación:")
     return LINK
 
 def link(update: Update, context: CallbackContext) -> int:
     context.user_data['link'] = update.message.text
-    update.message.reply_text('Imagen de la publicación (puedes enviar una URL o un archivo de imagen):')
-    return IMAGE
+    update.message.reply_text("Por favor, envía la imagen de la publicación o proporciona una URL de la imagen:")
+    return IMAGEN
 
-def image(update: Update, context: CallbackContext) -> int:
+def imagen(update: Update, context: CallbackContext) -> int:
     if update.message.photo:
-        context.user_data['image'] = update.message.photo[-1].file_id
+        photo_file = update.message.photo[-1].get_file()
+        context.user_data['imagen'] = photo_file.file_id
+        context.user_data['imagen_tipo'] = 'archivo'
+    elif update.message.text:
+        context.user_data['imagen'] = update.message.text
+        context.user_data['imagen_tipo'] = 'url'
     else:
-        context.user_data['image'] = update.message.text
-    update.message.reply_text('¿Quieres publicar ahora o programar la publicación? (responde con "ahora" o "programar")\nFecha y hora actual: {}'.format(datetime.now(pytz.timezone("Europe/Madrid")).strftime('%Y-%m-%d %H:%M:%S')))
-    return SCHEDULE
+        update.message.reply_text("Formato no reconocido. Por favor, envía una imagen o proporciona una URL de la imagen:")
+        return IMAGEN
 
-def schedule(update: Update, context: CallbackContext) -> int:
-    response = update.message.text.lower()
-    if response == "ahora":
-        return publish_now(update, context)
-    elif response == "programar":
-        update.message.reply_text('Introduce la fecha y hora de la publicación (formato: YYYY-MM-DD HH:MM):')
-        return CONFIRM
+    update.message.reply_text("¿Confirmas la publicación? (Sí/No)")
+    return CONFIRMAR
+
+def confirmar(update: Update, context: CallbackContext) -> int:
+    if update.message.text.lower() == 'sí':
+        context.user_data['canal'] = update.message.chat_id
+        update.message.reply_text("¿Deseas publicar ahora o programar la publicación? (Responde con 'Ahora' o 'Programar')")
+        return PROGRAMA
     else:
-        update.message.reply_text('Respuesta no válida. Responde con "ahora" o "programar".')
-        return SCHEDULE
+        update.message.reply_text("Operación cancelada.")
+        return ConversationHandler.END
 
-def publish_now(update: Update, context: CallbackContext) -> int:
-    send_publication(context.user_data)
-    update.message.reply_text('Publicación realizada.')
-    return ConversationHandler.END
+def programa(update: Update, context: CallbackContext) -> int:
+    if update.message.text.lower() == 'ahora':
+        enviar_publicacion(context)
+        update.message.reply_text("Publicación realizada con éxito.")
+        return ConversationHandler.END
+    elif update.message.text.lower() == 'programar':
+        update.message.reply_text("Por favor, proporciona la fecha y hora (AAAA-MM-DD HH:MM) en horario español:")
+        return CANAL
+    else:
+        update.message.reply_text("Respuesta no válida. Operación cancelada.")
+        return ConversationHandler.END
 
-def confirm(update: Update, context: CallbackContext) -> int:
+def canal(update: Update, context: CallbackContext) -> int:
     try:
         schedule_time = datetime.strptime(update.message.text, '%Y-%m-%d %H:%M')
-        schedule_time = pytz.timezone("Europe/Madrid").localize(schedule_time)
-        job_id = str(len(scheduled_jobs) + 1)
-        scheduler.add_job(send_publication, DateTrigger(run_date=schedule_time), [context.user_data], id=job_id)
-        scheduled_jobs[job_id] = context.user_data
-        update.message.reply_text('Publicación programada para: {}'.format(schedule_time.strftime('%Y-%m-%d %H:%M:%S')))
+        schedule_time = pytz.timezone('Europe/Madrid').localize(schedule_time)
+        context.user_data['schedule_time'] = schedule_time
+        publicaciones_programadas.append(context.user_data.copy())
+        update.message.reply_text("Publicación programada con éxito.")
         return ConversationHandler.END
     except ValueError:
-        update.message.reply_text('Fecha y hora no válidas. Por favor, introduce en el formato correcto: YYYY-MM-DD HH:MM.')
-        return CONFIRM
-
-def send_publication(data: dict) -> None:
-    channel = data['channel']
-    name = f"*{data['name']}*"
-    title = f"*{data['title']}*"
-    description = data['description']
-    coupon = f"*➡️CUPÓN: {data['coupon']}*"
-    offer_price = f"*✅OFERTA: {data['offer_price']}*"
-    old_price = f"*❌ANTES: {data['old_price']}*"
-    link = data['link']
-    image = data['image']
-
-    message = f"{name}\n{title}\n{description}\n{coupon}\n{offer_price}\n~{old_price}~\n{link}"
-
-    if image.startswith('http'):
-        bot.send_message(chat_id=channel, text=message, parse_mode='Markdown')
-        bot.send_photo(chat_id=channel, photo=image)
-    else:
-        bot.send_message(chat_id=channel, text=message, parse_mode='Markdown')
-        bot.send_photo(chat_id=channel, photo=image)
-
-def list_scheduled(update: Update, context: CallbackContext) -> None:
-    if scheduled_jobs:
-        message = "Publicaciones programadas:\n"
-        for job_id, data in scheduled_jobs.items():
-            message += f"ID: {job_id}, Fecha/Hora: {scheduler.get_job(job_id).next_run_time}, Canal: {data['channel']}, Título: {data['title']}\n"
-        update.message.reply_text(message)
-    else:
-        update.message.reply_text("No hay publicaciones programadas.")
-
-def edit_scheduled(update: Update, context: CallbackContext) -> int:
-    job_id = update.message.text.split()[1]
-    if job_id in scheduled_jobs:
-        context.user_data['edit_job_id'] = job_id
-        update.message.reply_text('Introduce los nuevos detalles de la publicación.')
-        return CHANNEL
-    else:
-        update.message.reply_text('ID de publicación no encontrado.')
+        update.message.reply_text("Formato de fecha y hora no válido. Operación cancelada.")
         return ConversationHandler.END
 
-def delete_scheduled(update: Update, context: CallbackContext) -> None:
-    job_id = update.message.text.split()[1]
-    if job_id in scheduled_jobs:
-        scheduler.remove_job(job_id)
-        del scheduled_jobs[job_id]
-        update.message.reply_text('Publicación eliminada.')
-    else:
-        update.message.reply_text('ID de publicación no encontrado.')
+def enviar_publicacion(context: CallbackContext):
+    job = context.job
+    data = job.context
 
-def cancel(update: Update, context: CallbackContext) -> int:
-    update.message.reply_text('Operación cancelada.')
-    return ConversationHandler.END
-
-def main() -> None:
-    dp = updater.dispatcher
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            CHANNEL: [MessageHandler(Filters.text & ~Filters.command, channel)],
-            NAME: [MessageHandler(Filters.text & ~Filters.command, name)],
-            TITLE: [MessageHandler(Filters.text & ~Filters.command, title)],
-            DESCRIPTION: [MessageHandler(Filters.text & ~Filters.command, description)],
-            COUPON: [MessageHandler(Filters.text & ~Filters.command, coupon)],
-            OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, offer_price)],
-            OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, old_price)],
-            LINK: [MessageHandler(Filters.text & ~Filters.command, link)],
-            IMAGE: [MessageHandler(Filters.text & ~Filters.command, image)],
-            SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, schedule)],
-            CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm)]
-        },
-        fallbacks=[CommandHandler('cancel', cancel)],
+    mensaje = (
+        f"<b><a href='{data['link']}'>{data['tienda']}</a></b>\n\n"
+        f"<b>{data['titulo']}</b>\n\n"
+        f"{data['descripcion']}\n\n"
+        f"<b>➡️CUPÓN: {data['cupon']}</b>\n\n"
+        f"<b>✅OFERTA: <span style='color:red;'>{data['oferta']}</span></b>\n\n"
+        f"<b>❌ANTES: <s>{data['antes']}</s></b>\n\n"
+        f"{data['link']}"
     )
 
-    dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler('list', list_scheduled))
-    dp.add_handler(CommandHandler('edit', edit_scheduled, pass_args=True))
-    dp.add_handler(CommandHandler('delete', delete_scheduled, pass_args=True))
+    if data['imagen_tipo'] == 'url':
+        bot.send_message(
+            chat_id=data['canal'],
+            text=mensaje,
+            parse_mode=ParseMode.HTML
+        )
+        bot.send_photo(
+            chat_id=data['canal'],
+            photo=data['imagen']
+        )
+    else:
+        bot.send_message(
+            chat_id=data['canal'],
+            text=mensaje,
+            parse_mode=ParseMode.HTML
+        )
+        bot.send_photo(
+            chat_id=data['canal'],
+            photo=data['imagen']
+        )
 
-    updater.start_polling()
-    updater.idle()
+def error(update: Update, context: CallbackContext):
+    """Log Errors caused by Updates."""
+    context.logger.warning('Update "%s" caused error "%s"', update, context.error)
 
-if __name__ == '__main__':
-    main()
+# Añadir los handlers al dispatcher
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('start', start)],
+    states={
+        TIENDA: [MessageHandler(Filters.text & ~Filters.command, tienda)],
+        TITULO: [MessageHandler(Filters.text & ~Filters.command, titulo)],
+        DESCRIPCION: [MessageHandler(Filters.text & ~Filters.command, descripcion)],
+        CUPON: [MessageHandler(Filters.text & ~Filters.command, cupon)],
+        OFERTA: [MessageHandler(Filters.text & ~Filters.command, oferta)],
+        ANTES: [MessageHandler(Filters.text & ~Filters.command, antes)],
+        LINK: [MessageHandler(Filters.text & ~Filters.command, link)],
+        IMAGEN: [MessageHandler(Filters.photo | Filters.text & ~Filters.command, imagen)],
+        CONFIRMAR: [MessageHandler(Filters.text & ~Filters.command, confirmar)],
+        PROGRAMA: [MessageHandler(Filters.text & ~Filters.command, programa)],
+        CANAL: [MessageHandler(Filters.text & ~Filters.command, canal)],
+    },
+    fallbacks=[CommandHandler('cancel', lambda update, context: update.message.reply_text('Operación cancelada.'))]
+)
+
+dispatcher.add_handler(conv_handler)
+dispatcher.add_error_handler(error)
+
+updater.start_polling()
+updater.idle()
