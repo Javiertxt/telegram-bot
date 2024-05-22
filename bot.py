@@ -1,13 +1,12 @@
 import os
 import logging
-from telegram import Update, ParseMode
+from telegram import Update, ParseMode, Bot
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
 from telegram.ext.callbackcontext import CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from pytz import timezone
 import datetime
-import os
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
