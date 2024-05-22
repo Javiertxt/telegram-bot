@@ -1,11 +1,16 @@
 import os
 import logging
-from telegram import Bot, Update, ParseMode, InputMediaPhoto
+from telegram import Bot, Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from pytz import timezone
 import datetime
+import os
+
+# Configurar el logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Variables de entorno
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -25,13 +30,11 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # Estados para la conversación
 ASK_CHANNEL, ASK_STORE_NAME, ASK_TITLE, ASK_DESCRIPTION, ASK_COUPON, ASK_OFFER_PRICE, ASK_OLD_PRICE, ASK_URL, ASK_IMAGE, ASK_CONFIRMATION, ASK_SCHEDULE = range(11)
 
-# Variables globales para almacenar la información de la publicación
-publication_data = {}
-scheduled_jobs = {}
-
 def start(update: Update, context: CallbackContext):
-    update.message.reply_text('Bienvenido al bot de publicaciones. ¿En qué canal deseas publicar?')
-    return ASK_CHANNEL
+# Inicializar user_data para el usuario
+context.user_data['publication_data'] = {}
+update.message.reply_text('Bienvenido al bot de publicaciones. ¿En qué canal deseas publicar?')
+return ASK_CHANNEL
 
 def ask_channel(update: Update, context: CallbackContext):
     channel = update.message.text
@@ -145,24 +148,25 @@ def schedule(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 def post_publication(context: CallbackContext):
-    message = (
-        f"<b><a href='{publication_data['url']}'>{publication_data['store_name']}</a></b>\n\n"
-        f"<b>{publication_data['title']}</b>\n\n"
-        f"{publication_data['description']}\n\n"
-        f"<b>➡️CUPÓN: {publication_data['coupon']}</b>\n\n"
-        f"<b>✅OFERTA: {publication_data['offer_price']}</b>\n\n"
-        f"<b>❌ANTES: <s>{publication_data['old_price']}</s></b>\n\n"
-        f"{publication_data['url']}\n"
-    )
-    chat_id = publication_data['channel']
-
-    if publication_data.get('image'):
-        if publication_data['image'].startswith('http'):
-            context.bot.send_photo(chat_id=chat_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
-        else:
-            context.bot.send_photo(chat_id=chat_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
-    else:
-        context.bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
+# Acceder a publication_data desde context.user_data
+publication_data = context.user_data['publication_data']
+message = (
+f"<b><a href='{publication_data['url']}'>{publication_data['store_name']}</a></b>\n\n"
+f"<b>{publication_data['title']}</b>\n\n"
+f"{publication_data['description']}\n\n"
+f"<b>➡️CUPÓN: {publication_data['coupon']}</b>\n\n"
+f"<b>✅OFERTA: {publication_data['offer_price']}</b>\n\n"
+f"<b>❌ANTES: <s>{publication_data['old_price']}</s></b>\n\n"
+f"{publication_data['url']}\n"
+)
+chat_id = publication_data['channel']
+if publication_data.get('image'):
+if publication_data['image'].startswith('http'):
+context.bot.send_photo(chat_id=chat_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
+else:
+context.bot.send_photo(chat_id=chat_id, photo=publication_data['image'], caption=message, parse_mode=ParseMode.HTML)
+else:
+context.bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text('Operación cancelada.')
