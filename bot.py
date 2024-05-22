@@ -28,7 +28,7 @@ scheduler = BackgroundScheduler(timezone="Europe/Madrid")
 scheduler.start()
 
 # Obtener el token del bot desde las variables de entorno
-TOKEN = os.getenv("7189244415:AAEpS6rLPhWT5GaSSwNoCJ2bLWVla9CdYj8")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # Crear el bot y el updater
 request = Request(con_pool_size=8)
