@@ -1,7 +1,7 @@
 import os
 import logging
 from telegram import Update, ParseMode, Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, Dispatcher
 from telegram.ext.callbackcontext import CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 # Variables de entorno
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PORT = int(os.environ.get("PORT", "8443"))
-RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 HEROKU_APP_NAME = os.getenv("HEROKU_APP_NAME")
 
 # Configuración del bot
@@ -193,32 +192,10 @@ conv_handler = ConversationHandler(
 # Añadir el manejador de conversación al dispatcher
 dispatcher.add_handler(conv_handler)
 
-# Funciones de bloqueo
-LOCK_FILE = '/tmp/bot.lock'
-
-def acquire_lock():
-    try:
-        lock_fd = open(LOCK_FILE, 'w')
-        fcntl.lockf(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return lock_fd
-    except IOError:
-        return None
-
-def release_lock(lock_fd):
-    if lock_fd:
-        fcntl.lockf(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
-        os.unlink(LOCK_FILE)
-
 if __name__ == '__main__':
-    lock_fd = acquire_lock()
-    if not lock_fd:
-        print("Otra instancia del bot ya está en ejecución.")
-        exit(1)
+    # Webhook settings
+    updater.start_webhook(listen="0.0.0.0", port=PORT, url_path=TOKEN)
+    updater.bot.setWebhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
 
-    try:
-        scheduler.start()
-        updater.start_polling()
-        updater.idle()
-    finally:
-        release_lock(lock_fd)
+    scheduler.start()
+    updater.idle()
