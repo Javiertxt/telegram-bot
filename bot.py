@@ -1,3 +1,8 @@
+import os
+
+# Imprime el valor de la variable de entorno TELEGRAM_BOT_TOKEN
+print("Valor de TELEGRAM_BOT_TOKEN:", os.getenv("TELEGRAM_BOT_TOKEN"))
+
 import logging
 from telegram import Bot, Update, InputFile
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
