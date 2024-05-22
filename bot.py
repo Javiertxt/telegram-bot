@@ -1,13 +1,12 @@
 import logging
-from telegram import Bot, Update
+from telegram import Bot, Update, InputFile
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
-from telegram.ext.dispatcher import run_async
 from telegram.utils.request import Request
 import os
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Definir constantes para los estados de la conversación
 CHANNEL, NAME, TITLE, DESCRIPTION, COUPON, OFFER_PRICE, OLD_PRICE, LINK, IMAGE, SCHEDULE, CONFIRM, PUBLISH_NOW = range(12)
@@ -144,12 +143,11 @@ def list_scheduled(update: Update, context: CallbackContext) -> None:
 def edit_scheduled(update: Update, context: CallbackContext) -> int:
     job_id = update.message.text.split()[1]
     if job_id in scheduled_jobs:
-        context.user_data['job_id'] = job_id
-        context.user_data.update(scheduled_jobs[job_id])
-        update.message.reply_text("¿Qué campo quieres editar? (Canal, Nombre, Título, Descripción, Cupón, Precio oferta, Precio anterior, Link, Imagen, Fecha/Hora)")
-        return 1
+        context.user_data['edit_job_id'] = job_id
+        update.message.reply_text('Introduce los nuevos detalles de la publicación.')
+        return CHANNEL
     else:
-        update.message.reply_text("ID de publicación no encontrado.")
+        update.message.reply_text('ID de publicación no encontrado.')
         return ConversationHandler.END
 
 def delete_scheduled(update: Update, context: CallbackContext) -> None:
@@ -157,9 +155,9 @@ def delete_scheduled(update: Update, context: CallbackContext) -> None:
     if job_id in scheduled_jobs:
         scheduler.remove_job(job_id)
         del scheduled_jobs[job_id]
-        update.message.reply_text(f"Publicación ID: {job_id} eliminada.")
+        update.message.reply_text('Publicación eliminada.')
     else:
-        update.message.reply_text("ID de publicación no encontrado.")
+        update.message.reply_text('ID de publicación no encontrado.')
 
 def cancel(update: Update, context: CallbackContext) -> int:
     update.message.reply_text('Operación cancelada.')
@@ -183,19 +181,15 @@ def main() -> None:
             SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, schedule)],
             CONFIRM: [MessageHandler(Filters.text & ~Filters.command, confirm)]
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler('cancel', cancel)],
     )
 
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler('list', list_scheduled))
-    dp.add_handler(CommandHandler('edit', edit_scheduled))
-    dp.add_handler(CommandHandler('delete', delete_scheduled))
+    dp.add_handler(CommandHandler('edit', edit_scheduled, pass_args=True))
+    dp.add_handler(CommandHandler('delete', delete_scheduled, pass_args=True))
 
-    updater.start_webhook(listen="0.0.0.0",
-                          port=int(os.environ.get("PORT", 8443)),
-                          url_path=TOKEN)
-    updater.bot.setWebhook(f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}")
-
+    updater.start_polling()
     updater.idle()
 
 if __name__ == '__main__':
