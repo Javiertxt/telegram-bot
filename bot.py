@@ -7,7 +7,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from pytz import timezone
 import datetime
-import fcntl
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Variables de entorno
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PORT = int(os.environ.get("PORT", "8443"))
-RENDER_APP_NAME = "telegram-bot"  # Nombre de la aplicación en Render
+EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  # URL externa proporcionada por Render
 
 # Configuración del bot
 bot = Bot(token=TOKEN)
@@ -183,7 +182,10 @@ conv_handler = ConversationHandler(
         ASK_URL: [MessageHandler(Filters.text & ~Filters.command, ask_url)],
         ASK_IMAGE: [MessageHandler(Filters.text & ~Filters.command, ask_image)],
         ASK_CONFIRMATION: [MessageHandler(Filters.text & ~Filters.command, ask_confirmation)],
-        ASK_SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, ask_schedule)],
+        ASK_SCHEDULE: [
+            MessageHandler(Filters.text & ~Filters.command, ask_schedule),
+            MessageHandler(Filters.text & ~Filters.command, schedule),
+        ],
     },
     fallbacks=[CommandHandler('cancel', cancel)]
 )
@@ -194,7 +196,7 @@ dispatcher.add_handler(conv_handler)
 if __name__ == '__main__':
     # Webhook settings
     updater.start_webhook(listen="0.0.0.0", port=PORT, url_path=TOKEN)
-    updater.bot.setWebhook(f"https://{RENDER_APP_NAME}.onrender.com/{TOKEN}")
+    updater.bot.set_webhook(f"{EXTERNAL_URL}/{TOKEN}")
 
     scheduler.start()
     updater.idle()
