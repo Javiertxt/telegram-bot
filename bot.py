@@ -1,11 +1,13 @@
 import os
 import logging
 from telegram import Update, ParseMode, Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
+from telegram.ext.callbackcontext import CallbackContext
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from pytz import timezone
 import datetime
+import fcntl
 
 # Configurar el logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -27,6 +29,7 @@ scheduler = BackgroundScheduler(timezone="Europe/Madrid")
 ASK_CHANNEL, ASK_STORE_NAME, ASK_TITLE, ASK_DESCRIPTION, ASK_COUPON, ASK_OFFER_PRICE, ASK_OLD_PRICE, ASK_URL, ASK_IMAGE, ASK_CONFIRMATION, ASK_SCHEDULE = range(11)
 
 def start(update: Update, context: CallbackContext):
+    # Inicializar user_data para el usuario
     context.user_data['publication_data'] = {}
     update.message.reply_text('Bienvenido al bot de publicaciones. ¿En qué canal deseas publicar?')
     return ASK_CHANNEL
@@ -109,7 +112,7 @@ def preview_publication(update: Update, context: CallbackContext):
 
 def ask_confirmation(update: Update, context: CallbackContext):
     confirmation = update.message.text.lower()
-    if confirmation in ['sí', 'si']:
+    if confirmation == 'sí':
         update.message.reply_text('¿Deseas publicar ahora o programar la publicación? (Ahora/Programar)')
         return ASK_SCHEDULE
     else:
@@ -137,14 +140,14 @@ def schedule(update: Update, context: CallbackContext):
         schedule_time = timezone('Europe/Madrid').localize(schedule_time)
         job = scheduler.add_job(post_publication, DateTrigger(run_date=schedule_time), [context])
         job_id = str(job.id)
-        scheduled_jobs[job_id] = context.user_data['publication_data'].copy()
+        context.user_data['scheduled_jobs'][job_id] = context.user_data['publication_data'].copy()
         update.message.reply_text(f'Publicación programada para {schedule_time}.')
     except ValueError:
         update.message.reply_text('Formato de fecha y hora no válido. Operación cancelada.')
     return ConversationHandler.END
 
 def post_publication(context: CallbackContext):
-    publication_data = context.job.context.user_data['publication_data']
+    publication_data = context.user_data['publication_data']
     message = (
         f"<b><a href='{publication_data['url']}'>{publication_data['store_name']}</a></b>\n\n"
         f"<b>{publication_data['title']}</b>\n\n"
@@ -179,16 +182,43 @@ conv_handler = ConversationHandler(
         ASK_OFFER_PRICE: [MessageHandler(Filters.text & ~Filters.command, ask_offer_price)],
         ASK_OLD_PRICE: [MessageHandler(Filters.text & ~Filters.command, ask_old_price)],
         ASK_URL: [MessageHandler(Filters.text & ~Filters.command, ask_url)],
-        ASK_IMAGE: [MessageHandler(Filters.photo | Filters.text & ~Filters.command, ask_image)],
+        ASK_IMAGE: [MessageHandler(Filters.text & ~Filters.command, ask_image)],
         ASK_CONFIRMATION: [MessageHandler(Filters.text & ~Filters.command, ask_confirmation)],
         ASK_SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, ask_schedule)],
+        ASK_SCHEDULE: [MessageHandler(Filters.text & ~Filters.command, schedule)],
     },
     fallbacks=[CommandHandler('cancel', cancel)]
 )
 
+# Añadir el manejador de conversación al dispatcher
 dispatcher.add_handler(conv_handler)
 
+# Funciones de bloqueo
+LOCK_FILE = '/tmp/bot.lock'
+
+def acquire_lock():
+    try:
+        lock_fd = open(LOCK_FILE, 'w')
+        fcntl.lockf(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except IOError:
+        return None
+
+def release_lock(lock_fd):
+    if lock_fd:
+        fcntl.lockf(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+        os.unlink(LOCK_FILE)
+
 if __name__ == '__main__':
-    scheduler.start()
-    updater.start_polling()
-    updater.idle()
+    lock_fd = acquire_lock()
+    if not lock_fd:
+        print("Otra instancia del bot ya está en ejecución.")
+        exit(1)
+
+    try:
+        scheduler.start()
+        updater.start_polling()
+        updater.idle()
+    finally:
+        release_lock(lock_fd)
