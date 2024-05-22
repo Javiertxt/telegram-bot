@@ -27,7 +27,6 @@ scheduler = BackgroundScheduler(timezone="Europe/Madrid")
 ASK_CHANNEL, ASK_STORE_NAME, ASK_TITLE, ASK_DESCRIPTION, ASK_COUPON, ASK_OFFER_PRICE, ASK_OLD_PRICE, ASK_URL, ASK_IMAGE, ASK_CONFIRMATION, ASK_SCHEDULE = range(11)
 
 def start(update: Update, context: CallbackContext):
-    # Inicializar user_data para el usuario
     context.user_data['publication_data'] = {}
     update.message.reply_text('Bienvenido al bot de publicaciones. ¿En qué canal deseas publicar?')
     return ASK_CHANNEL
@@ -110,7 +109,7 @@ def preview_publication(update: Update, context: CallbackContext):
 
 def ask_confirmation(update: Update, context: CallbackContext):
     confirmation = update.message.text.lower()
-    if confirmation == 'sí':
+    if confirmation in ['sí', 'si']:
         update.message.reply_text('¿Deseas publicar ahora o programar la publicación? (Ahora/Programar)')
         return ASK_SCHEDULE
     else:
