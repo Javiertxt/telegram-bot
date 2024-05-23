@@ -135,12 +135,13 @@ dispatcher.add_error_handler(error)
 
 # Iniciar el bot con Webhook en Heroku
 if __name__ == '__main__':
-    HEROKU_APP_NAME = os.getenv('HEROKU_APP_NAME')  # Añadido para obtener el nombre de la app
+    HEROKU_APP_NAME = os.getenv('HEROKU_APP_NAME')
     updater.start_webhook(listen="0.0.0.0",
                           port=PORT,
                           url_path=TOKEN)
     updater.bot.set_webhook(f"https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}")
 
     updater.idle()
+
 
 
